@@ -6,7 +6,7 @@ st.set_page_config(page_title="Student Dashboard", layout="wide")
 st.title("🎓 Student Performance Dashboard")
 
 # Load data
-df = pd.read_csv("final_student_realistic_v3.csv")
+df = pd.read_csv("final_student_200.csv")
 
 # -------------------------
 # 🧹 DATA CLEANING
