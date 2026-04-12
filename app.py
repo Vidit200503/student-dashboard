@@ -3,8 +3,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from sklearn.linear_model import LinearRegression
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
 
 st.set_page_config(page_title="Student Performance Dashboard", layout="wide")
 
@@ -34,11 +34,9 @@ def load_data():
 
     df = df[ALL_COLUMNS].copy()
     if not df.empty:
-        df["roll"] = pd.to_numeric(df["roll"], errors="coerce")
-        df["attendance"] = pd.to_numeric(df["attendance"], errors="coerce")
-        df["sessional1"] = pd.to_numeric(df["sessional1"], errors="coerce")
-        df["sessional2"] = pd.to_numeric(df["sessional2"], errors="coerce")
-        df["sessional3"] = pd.to_numeric(df["sessional3"], errors="coerce")
+        numeric_columns = ["roll", "attendance", "sessional1", "sessional2", "sessional3"]
+        for column in numeric_columns:
+            df[column] = pd.to_numeric(df[column], errors="coerce")
     return df
 
 
@@ -87,6 +85,7 @@ def train_model_cached(data_signature):
     return model, accuracy
 
 
+
 def get_grade(prediction):
     if prediction >= 90:
         return "A+"
@@ -103,12 +102,14 @@ def get_grade(prediction):
     return "F"
 
 
+
 def get_attendance_status(attendance):
     if attendance < 65:
         return "Poor"
     if attendance <= 75:
         return "Good"
     return "Excellent"
+
 
 
 def get_trend(s1, s2, s3):
@@ -119,6 +120,7 @@ def get_trend(s1, s2, s3):
     return "Stable"
 
 
+
 def predict_student(model, attendance, s1, s2, s3):
     features = pd.DataFrame(
         [[attendance, s1, s2, s3]],
@@ -126,6 +128,7 @@ def predict_student(model, attendance, s1, s2, s3):
     )
     prediction = float(model.predict(features)[0])
     return round(max(0.0, min(100.0, prediction)), 2)
+
 
 
 def build_result_row(model, name, roll, attendance, s1, s2, s3):
@@ -152,8 +155,32 @@ def build_result_row(model, name, roll, attendance, s1, s2, s3):
     }
 
 
-def save_entry(df, row_data):
-    updated_df = pd.concat([df, pd.DataFrame([row_data])], ignore_index=True)
+
+def save_entry(df, row_data, replace_existing=False):
+    working_df = df.copy()
+    roll_value = int(row_data["roll"])
+    existing_mask = working_df["roll"].fillna(-1).astype(int) == roll_value
+
+    if replace_existing and existing_mask.any():
+        working_df = working_df.loc[~existing_mask].copy()
+
+    updated_df = pd.concat([working_df, pd.DataFrame([row_data])], ignore_index=True)
+    updated_df = updated_df.sort_values("roll").reset_index(drop=True)
+    updated_df.to_csv(CSV_PATH, index=False)
+    return updated_df
+
+
+
+def save_prediction_to_existing_record(df, roll, prediction_data):
+    updated_df = df.copy()
+    roll_mask = updated_df["roll"].fillna(-1).astype(int) == int(roll)
+
+    if not roll_mask.any():
+        raise ValueError("The selected roll number was not found in the dataset.")
+
+    for column in OUTPUT_COLUMNS:
+        updated_df.loc[roll_mask, column] = prediction_data[column]
+
     updated_df = updated_df.sort_values("roll").reset_index(drop=True)
     updated_df.to_csv(CSV_PATH, index=False)
     return updated_df
@@ -163,9 +190,15 @@ if "last_prediction" not in st.session_state:
     st.session_state.last_prediction = None
 if "pending_row" not in st.session_state:
     st.session_state.pending_row = None
+if "duplicate_roll_found" not in st.session_state:
+    st.session_state.duplicate_roll_found = False
+if "existing_row_preview" not in st.session_state:
+    st.session_state.existing_row_preview = None
+if "searched_student_result" not in st.session_state:
+    st.session_state.searched_student_result = None
 
 st.title("Student Performance Dashboard")
-st.caption("Add student records, generate predictions, and save new entries directly to the dataset.")
+st.caption("Add student records, generate predictions, and save records directly to the dataset.")
 
 try:
     df = load_data()
@@ -189,9 +222,11 @@ left_col, right_col = st.columns([1, 1])
 with left_col:
     st.subheader("Add New Student")
 
+    default_roll = int(df["roll"].max()) + 1 if not df.empty and pd.notna(df["roll"].max()) else 1
+
     with st.form("student_entry_form", clear_on_submit=False):
         name = st.text_input("Student Name", placeholder="Enter full name")
-        roll = st.number_input("Roll Number", min_value=1, step=1, value=201)
+        roll = st.number_input("Roll Number", min_value=1, step=1, value=default_roll)
         attendance = st.number_input("Attendance (%)", min_value=0.0, max_value=100.0, step=1.0)
         s1 = st.number_input("Sessional 1 (out of 30)", min_value=0.0, max_value=30.0, step=1.0)
         s2 = st.number_input("Sessional 2 (out of 30)", min_value=0.0, max_value=30.0, step=1.0)
@@ -200,17 +235,26 @@ with left_col:
 
     if predict_clicked:
         clean_name = name.strip()
-        existing_rolls = set(df["roll"].dropna().astype(int).tolist())
 
         if not clean_name:
             st.warning("Please enter a student name.")
-        elif int(roll) in existing_rolls:
-            st.warning("This roll number already exists. Please enter a unique roll number.")
         else:
             result_row = build_result_row(model, clean_name, roll, attendance, s1, s2, s3)
             st.session_state.last_prediction = result_row
             st.session_state.pending_row = result_row
-            st.success("Prediction generated successfully.")
+
+            duplicate_mask = df["roll"].fillna(-1).astype(int) == int(roll)
+            st.session_state.duplicate_roll_found = bool(duplicate_mask.any())
+            st.session_state.existing_row_preview = (
+                df.loc[duplicate_mask].iloc[0].to_dict() if duplicate_mask.any() else None
+            )
+
+            if st.session_state.duplicate_roll_found:
+                st.warning(
+                    "This roll number already exists. You can replace the existing record with the new values. If you only want to generate and save prediction for an existing record, use the search section below."
+                )
+            else:
+                st.success("Prediction generated successfully.")
 
 with right_col:
     st.subheader("Prediction Result")
@@ -232,16 +276,45 @@ with right_col:
         st.write(f"**Attendance Status:** {result['attendance_status']}")
         st.write(f"**Trend:** {result['trend']}")
 
-        if st.button("Save Entry to Dataset"):
-            try:
-                df = save_entry(df, st.session_state.pending_row)
-                st.session_state.pending_row = None
-                st.cache_data.clear()
-                train_model_cached.clear()
-                st.success("Entry saved successfully.")
-                st.rerun()
-            except Exception as error:
-                st.error(f"Save failed: {error}")
+        replace_existing = False
+        if st.session_state.duplicate_roll_found:
+            st.warning("A record with this roll number is already present in the dataset.")
+            if st.session_state.existing_row_preview is not None:
+                existing = st.session_state.existing_row_preview
+                st.write("**Existing Record**")
+                st.write(f"Name: {existing.get('name', '')}")
+                st.write(f"Attendance: {existing.get('attendance', '')}%")
+                st.write(
+                    f"Sessional Scores: {existing.get('sessional1', '')}, {existing.get('sessional2', '')}, {existing.get('sessional3', '')}"
+                )
+            replace_existing = st.checkbox(
+                "Roll number already exists. Replace the existing record with this new entry?",
+                value=False,
+                key="replace_existing_checkbox",
+            )
+
+        button_label = "Replace Existing Entry" if st.session_state.duplicate_roll_found else "Save Entry to Dataset"
+
+        if st.button(button_label):
+            if st.session_state.duplicate_roll_found and not replace_existing:
+                st.info("Replacement was not selected. Existing record has not been changed.")
+            else:
+                try:
+                    df = save_entry(
+                        df,
+                        st.session_state.pending_row,
+                        replace_existing=st.session_state.duplicate_roll_found,
+                    )
+                    st.session_state.pending_row = None
+                    st.session_state.last_prediction = None
+                    st.session_state.duplicate_roll_found = False
+                    st.session_state.existing_row_preview = None
+                    st.cache_data.clear()
+                    train_model_cached.clear()
+                    st.success("Dataset updated successfully.")
+                    st.rerun()
+                except Exception as error:
+                    st.error(f"Save failed: {error}")
 
 st.divider()
 st.subheader("Search Existing Student")
@@ -252,43 +325,56 @@ with search_col2:
     search_clicked = st.button("Search Record")
 
 if search_clicked:
-    student = df[df["roll"].fillna(-1).astype(int) == int(search_roll)]
-    if student.empty:
+    student_df = df[df["roll"].fillna(-1).astype(int) == int(search_roll)]
+    if student_df.empty:
+        st.session_state.searched_student_result = None
         st.warning("No student record found for this roll number.")
     else:
-        student = student.iloc[0]
-        if pd.isna(student["predicted_endsem"]):
-            predicted_endsem = predict_student(
-                model,
-                float(student["attendance"]),
-                float(student["sessional1"]),
-                float(student["sessional2"]),
-                float(student["sessional3"]),
-            )
-            status = "PASS" if predicted_endsem >= 40 else "FAIL"
-            grade = get_grade(predicted_endsem)
-            trend = get_trend(float(student["sessional1"]), float(student["sessional2"]), float(student["sessional3"]))
-            attendance_status = get_attendance_status(float(student["attendance"]))
-            average_sessional = round((float(student["sessional1"]) + float(student["sessional2"]) + float(student["sessional3"])) / 3.0, 2)
-        else:
-            predicted_endsem = student["predicted_endsem"]
-            status = student["status"]
-            grade = student["grade"]
-            trend = student["trend"]
-            attendance_status = student["attendance_status"]
-            average_sessional = student["average_sessional"]
+        student = student_df.iloc[0]
+        searched_result = build_result_row(
+            model,
+            str(student["name"]),
+            int(student["roll"]),
+            float(student["attendance"]),
+            float(student["sessional1"]),
+            float(student["sessional2"]),
+            float(student["sessional3"]),
+        )
+        st.session_state.searched_student_result = searched_result
 
-        detail_col1, detail_col2, detail_col3 = st.columns(3)
-        detail_col1.metric("Predicted EndSem", predicted_endsem)
-        detail_col2.metric("Status", status)
-        detail_col3.metric("Grade", grade)
+if st.session_state.searched_student_result is not None:
+    student_result = st.session_state.searched_student_result
 
-        st.write(f"**Name:** {student['name']}")
-        st.write(f"**Attendance:** {student['attendance']}%")
-        st.write(f"**Sessional Scores:** {student['sessional1']}, {student['sessional2']}, {student['sessional3']}")
-        st.write(f"**Average Sessional:** {average_sessional}")
-        st.write(f"**Attendance Status:** {attendance_status}")
-        st.write(f"**Trend:** {trend}")
+    detail_col1, detail_col2, detail_col3 = st.columns(3)
+    detail_col1.metric("Predicted EndSem", student_result["predicted_endsem"])
+    detail_col2.metric("Status", student_result["status"])
+    detail_col3.metric("Grade", student_result["grade"])
+
+    st.write(f"**Name:** {student_result['name']}")
+    st.write(f"**Roll Number:** {student_result['roll']}")
+    st.write(f"**Attendance:** {student_result['attendance']}%")
+    st.write(
+        f"**Sessional Scores:** {student_result['sessional1']}, {student_result['sessional2']}, {student_result['sessional3']}"
+    )
+    st.write(f"**Average Sessional:** {student_result['average_sessional']}")
+    st.write(f"**Attendance Status:** {student_result['attendance_status']}")
+    st.write(f"**Trend:** {student_result['trend']}")
+
+    existing_student_row = df[df["roll"].fillna(-1).astype(int) == int(student_result["roll"])].iloc[0]
+    prediction_already_saved = pd.notna(existing_student_row["predicted_endsem"])
+    prediction_button_label = (
+        "Update Saved Prediction" if prediction_already_saved else "Save Prediction to Existing Record"
+    )
+
+    if st.button(prediction_button_label):
+        try:
+            df = save_prediction_to_existing_record(df, student_result["roll"], student_result)
+            st.cache_data.clear()
+            train_model_cached.clear()
+            st.success("Prediction saved to the existing record successfully.")
+            st.rerun()
+        except Exception as error:
+            st.error(f"Prediction save failed: {error}")
 
 st.divider()
 st.subheader("Dataset Records")
