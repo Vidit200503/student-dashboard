@@ -12,15 +12,55 @@ st.set_page_config(page_title="Student Performance Dashboard", layout="wide")
 CSV_FILE = "final_student_200.csv"
 
 
+# -----------------------------
+# Data handling
+# -----------------------------
 def load_data():
     if os.path.exists(CSV_FILE):
         df = pd.read_csv(CSV_FILE)
     else:
         df = pd.DataFrame(columns=[
-            "name", "roll", "attendance", "sessional1", "sessional2", "sessional3"
+            "name",
+            "roll",
+            "attendance",
+            "sessional1",
+            "sessional2",
+            "sessional3",
+            "predicted_endsem",
+            "status",
+            "grade",
+            "trend",
+            "attendance_status",
+            "average_sessional",
+            "record_action",
+            "last_updated",
+            "source_mode"
         ])
 
     df.columns = df.columns.str.lower().str.strip()
+
+    required_columns = [
+        "name",
+        "roll",
+        "attendance",
+        "sessional1",
+        "sessional2",
+        "sessional3",
+        "predicted_endsem",
+        "status",
+        "grade",
+        "trend",
+        "attendance_status",
+        "average_sessional",
+        "record_action",
+        "last_updated",
+        "source_mode"
+    ]
+
+    for col in required_columns:
+        if col not in df.columns:
+            df[col] = None
+
     return df
 
 
@@ -28,13 +68,15 @@ def save_data(df):
     df.to_csv(CSV_FILE, index=False)
 
 
+# -----------------------------
+# Model preparation
+# -----------------------------
 def prepare_training_data(df):
     train_df = df.copy()
 
-    required_cols = ["attendance", "sessional1", "sessional2", "sessional3"]
-    for col in required_cols:
-        if col not in train_df.columns:
-            train_df[col] = 0
+    numeric_cols = ["attendance", "sessional1", "sessional2", "sessional3"]
+    for col in numeric_cols:
+        train_df[col] = pd.to_numeric(train_df[col], errors="coerce").fillna(0)
 
     if "endsem" not in train_df.columns:
         train_df["endsem"] = (
@@ -61,6 +103,9 @@ def train_model(df):
     return model
 
 
+# -----------------------------
+# Prediction helpers
+# -----------------------------
 def get_grade(prediction):
     if prediction >= 90:
         return "A+"
@@ -99,23 +144,23 @@ def get_trend(s1, s2, s3):
 
 def predict_result(model, attendance, s1, s2, s3):
     input_df = pd.DataFrame([{
-        "attendance": attendance,
-        "sessional1": s1,
-        "sessional2": s2,
-        "sessional3": s3
+        "attendance": float(attendance),
+        "sessional1": float(s1),
+        "sessional2": float(s2),
+        "sessional3": float(s3)
     }])
 
     prediction = float(model.predict(input_df)[0])
     prediction = max(0, min(100, prediction))
 
-    average_sessional = round((s1 + s2 + s3) / 3, 2)
+    average_sessional = round((float(s1) + float(s2) + float(s3)) / 3, 2)
 
     return {
         "predicted_endsem": round(prediction, 2),
         "status": get_status(prediction),
         "grade": get_grade(prediction),
-        "trend": get_trend(s1, s2, s3),
-        "attendance_status": get_attendance_status(attendance),
+        "trend": get_trend(float(s1), float(s2), float(s3)),
+        "attendance_status": get_attendance_status(float(attendance)),
         "average_sessional": average_sessional
     }
 
@@ -140,6 +185,9 @@ def build_student_record(name, roll, attendance, s1, s2, s3, result, action, sou
     }
 
 
+# -----------------------------
+# Download helpers
+# -----------------------------
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode("utf-8")
 
@@ -151,8 +199,12 @@ def convert_df_to_excel(df):
     return output.getvalue()
 
 
+# -----------------------------
+# UI helpers
+# -----------------------------
 def show_prediction_section(result):
     st.markdown("### Model Prediction")
+
     c1, c2, c3 = st.columns(3)
     c1.metric("Predicted EndSem", result["predicted_endsem"])
     c2.metric("Status", result["status"])
@@ -164,11 +216,14 @@ def show_prediction_section(result):
     c6.metric("Trend", result["trend"])
 
     st.info(
-        f"Model Prediction Summary: The model predicts {result['predicted_endsem']} marks in EndSem, "
-        f"with status {result['status']}, grade {result['grade']}, and trend {result['trend']}."
+        f"Model predicts {result['predicted_endsem']} marks in EndSem with "
+        f"status {result['status']}, grade {result['grade']}, and trend {result['trend']}."
     )
 
 
+# -----------------------------
+# App start
+# -----------------------------
 df = load_data()
 model = train_model(df)
 
@@ -181,6 +236,9 @@ tab1, tab2, tab3 = st.tabs([
     "View Updated Dataset"
 ])
 
+# -----------------------------
+# Tab 1: Add / Update Student
+# -----------------------------
 with tab1:
     st.subheader("Add New Student or Replace Existing Record")
 
@@ -225,7 +283,7 @@ with tab1:
 
         show_prediction_section(result)
 
-        existing = df[df["roll"] == student["roll"]]
+        existing = df[df["roll"].astype(int) == int(student["roll"])]
 
         if not existing.empty:
             st.warning("This roll number already exists.")
@@ -251,11 +309,14 @@ with tab1:
                         "Manual Entry"
                     )
 
-                    df = df[df["roll"] != student["roll"]]
-                    df = pd.concat([df, pd.DataFrame([updated_student])], ignore_index=True)
+                    existing_index = existing.index[0]
+
+                    for col, value in updated_student.items():
+                        df.loc[existing_index, col] = value
+
                     save_data(df)
 
-                    st.success("Existing record replaced successfully.")
+                    st.success("Existing record replaced successfully at the same position.")
                     st.session_state.pop("new_prediction", None)
                     st.rerun()
                 else:
@@ -281,6 +342,9 @@ with tab1:
                 st.session_state.pop("new_prediction", None)
                 st.rerun()
 
+# -----------------------------
+# Tab 2: Search Existing Student
+# -----------------------------
 with tab2:
     st.subheader("Search Existing Student and View Model Prediction")
 
@@ -295,7 +359,7 @@ with tab2:
         st.session_state["search_triggered"] = True
 
     if st.session_state.get("search_triggered", False):
-        found = df[df["roll"] == int(search_roll)]
+        found = df[df["roll"].astype(int) == int(search_roll)]
 
         if found.empty:
             st.error("No student found for this roll number.")
@@ -332,41 +396,30 @@ with tab2:
                 st.session_state["search_triggered"] = False
                 st.rerun()
 
+# -----------------------------
+# Tab 3: View Updated Dataset
+# -----------------------------
 with tab3:
     st.subheader("Updated Student Dataset")
 
     df_display = df.copy()
 
-    if "last_updated" in df_display.columns:
-        df_display["last_updated_sort"] = pd.to_datetime(
-            df_display["last_updated"],
-            errors="coerce"
-        )
-        df_display = df_display.sort_values(
-            by="last_updated_sort",
-            ascending=False,
-            na_position="last"
-        ).drop(columns=["last_updated_sort"])
-
     filter_col1, filter_col2 = st.columns(2)
 
     with filter_col1:
         if "record_action" in df_display.columns:
-            action_options = ["All"] + sorted(
-                [x for x in df_display["record_action"].dropna().astype(str).unique()]
-            )
+            action_values = [x for x in df_display["record_action"].dropna().astype(str).unique()]
+            action_options = ["All"] + sorted(action_values)
             selected_action = st.selectbox("Filter by Record Action", action_options)
             if selected_action != "All":
                 df_display = df_display[df_display["record_action"] == selected_action]
 
     with filter_col2:
-        if "source_mode" in df_display.columns:
-            source_options = ["All"] + sorted(
-                [x for x in df_display["source_mode"].dropna().astype(str).unique()]
-            )
-            selected_source = st.selectbox("Filter by Source Mode", source_options)
-            if selected_source != "All":
-                df_display = df_display[df_display["source_mode"] == selected_source]
+        search_name = st.text_input("Filter by Name")
+        if search_name.strip():
+            df_display = df_display[
+                df_display["name"].astype(str).str.lower().str.contains(search_name.strip().lower(), na=False)
+            ]
 
     st.write(f"**Total Records:** {len(df_display)}")
     st.dataframe(df_display, use_container_width=True)
