@@ -1,4 +1,5 @@
 import os
+from io import BytesIO
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -20,6 +21,12 @@ OUTPUT_COLUMNS = [
 ]
 ALL_COLUMNS = BASE_COLUMNS + OUTPUT_COLUMNS
 
+
+def dataframe_to_excel_bytes(dataframe):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        dataframe.to_excel(writer, index=False, sheet_name="Students")
+    return output.getvalue()
 
 def load_data():
     if not os.path.exists(CSV_PATH):
@@ -396,10 +403,29 @@ if show_full_dataset:
 else:
     st.dataframe(display_df.head(25), use_container_width=True, height=600)
 
-csv_download = display_df.to_csv(index=False).encode("utf-8")
-st.download_button(
-    label="Download Visible Records as CSV",
-    data=csv_download,
+download_col1, download_col2, download_col3 = st.columns(3)
+
+visible_csv_download = display_df.to_csv(index=False).encode("utf-8")
+full_csv_download = df.to_csv(index=False).encode("utf-8")
+full_excel_download = dataframe_to_excel_bytes(df)
+
+download_col1.download_button(
+    label="Download Visible Records (CSV)",
+    data=visible_csv_download,
     file_name="student_records_view.csv",
     mime="text/csv",
+)
+
+download_col2.download_button(
+    label="Download Updated Dataset (CSV)",
+    data=full_csv_download,
+    file_name="final_student_200_updated.csv",
+    mime="text/csv",
+)
+
+download_col3.download_button(
+    label="Download Updated Dataset (Excel)",
+    data=full_excel_download,
+    file_name="final_student_200_updated.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
