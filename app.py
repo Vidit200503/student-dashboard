@@ -151,11 +151,29 @@ def convert_df_to_excel(df):
     return output.getvalue()
 
 
+def show_prediction_section(result):
+    st.markdown("### Model Prediction")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Predicted EndSem", result["predicted_endsem"])
+    c2.metric("Status", result["status"])
+    c3.metric("Grade", result["grade"])
+
+    c4, c5, c6 = st.columns(3)
+    c4.metric("Average Sessional", result["average_sessional"])
+    c5.metric("Attendance Status", result["attendance_status"])
+    c6.metric("Trend", result["trend"])
+
+    st.info(
+        f"Model Prediction Summary: The model predicts {result['predicted_endsem']} marks in EndSem, "
+        f"with status {result['status']}, grade {result['grade']}, and trend {result['trend']}."
+    )
+
+
 df = load_data()
 model = train_model(df)
 
 st.title("Student Performance Prediction Dashboard")
-st.caption("Add, replace, update, view, and download student records directly from the dashboard.")
+st.caption("Add, replace, update, view, predict, and download student records directly from the dashboard.")
 
 tab1, tab2, tab3 = st.tabs([
     "Add / Update Student",
@@ -196,15 +214,16 @@ with tab1:
     if "new_prediction" in st.session_state:
         student = st.session_state["new_prediction"]
 
-        st.markdown("### Prediction Result")
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Predicted EndSem", student["predicted_endsem"])
-        m2.metric("Status", student["status"])
-        m3.metric("Grade", student["grade"])
+        result = {
+            "predicted_endsem": student["predicted_endsem"],
+            "status": student["status"],
+            "grade": student["grade"],
+            "trend": student["trend"],
+            "attendance_status": student["attendance_status"],
+            "average_sessional": student["average_sessional"]
+        }
 
-        st.write(f"**Trend:** {student['trend']}")
-        st.write(f"**Attendance Status:** {student['attendance_status']}")
-        st.write(f"**Average Sessional:** {student['average_sessional']}")
+        show_prediction_section(result)
 
         existing = df[df["roll"] == student["roll"]]
 
@@ -227,14 +246,7 @@ with tab1:
                         student["sessional1"],
                         student["sessional2"],
                         student["sessional3"],
-                        {
-                            "predicted_endsem": student["predicted_endsem"],
-                            "status": student["status"],
-                            "grade": student["grade"],
-                            "trend": student["trend"],
-                            "attendance_status": student["attendance_status"],
-                            "average_sessional": student["average_sessional"]
-                        },
+                        result,
                         "Replaced Existing Record",
                         "Manual Entry"
                     )
@@ -257,14 +269,7 @@ with tab1:
                     student["sessional1"],
                     student["sessional2"],
                     student["sessional3"],
-                    {
-                        "predicted_endsem": student["predicted_endsem"],
-                        "status": student["status"],
-                        "grade": student["grade"],
-                        "trend": student["trend"],
-                        "attendance_status": student["attendance_status"],
-                        "average_sessional": student["average_sessional"]
-                    },
+                    result,
                     "New Entry",
                     "Manual Entry"
                 )
@@ -277,7 +282,7 @@ with tab1:
                 st.rerun()
 
 with tab2:
-    st.subheader("Search Existing Student and Save Updated Prediction")
+    st.subheader("Search Existing Student and View Model Prediction")
 
     search_roll = st.number_input(
         "Enter Roll Number",
@@ -307,15 +312,7 @@ with tab2:
                 float(row["sessional3"])
             )
 
-            st.write("### Predicted Result")
-            p1, p2, p3 = st.columns(3)
-            p1.metric("Predicted EndSem", result["predicted_endsem"])
-            p2.metric("Status", result["status"])
-            p3.metric("Grade", result["grade"])
-
-            st.write(f"**Trend:** {result['trend']}")
-            st.write(f"**Attendance Status:** {result['attendance_status']}")
-            st.write(f"**Average Sessional:** {result['average_sessional']}")
+            show_prediction_section(result)
 
             if st.button("Save Prediction to Existing Record", use_container_width=True):
                 idx = found.index[0]
@@ -373,6 +370,13 @@ with tab3:
 
     st.write(f"**Total Records:** {len(df_display)}")
     st.dataframe(df_display, use_container_width=True)
+
+    if "predicted_endsem" in df_display.columns:
+        st.markdown("### Prediction Overview")
+        p1, p2, p3 = st.columns(3)
+        p1.metric("Students with Prediction", int(df_display["predicted_endsem"].notna().sum()))
+        p2.metric("Pass Predictions", int((df_display["status"] == "PASS").sum()) if "status" in df_display.columns else 0)
+        p3.metric("Fail Predictions", int((df_display["status"] == "FAIL").sum()) if "status" in df_display.columns else 0)
 
     csv_data = convert_df_to_csv(df_display)
     excel_data = convert_df_to_excel(df_display)
