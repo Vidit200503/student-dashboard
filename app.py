@@ -61,11 +61,54 @@ def load_data():
         if col not in df.columns:
             df[col] = None
 
+    numeric_cols = [
+        "roll",
+        "attendance",
+        "sessional1",
+        "sessional2",
+        "sessional3",
+        "predicted_endsem",
+        "average_sessional"
+    ]
+
+    text_cols = [
+        "name",
+        "status",
+        "grade",
+        "trend",
+        "attendance_status",
+        "record_action",
+        "last_updated",
+        "source_mode"
+    ]
+
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    for col in text_cols:
+        df[col] = df[col].astype("object")
+
     return df
 
 
 def save_data(df):
-    df.to_csv(CSV_FILE, index=False)
+    save_df = df.copy()
+
+    numeric_cols = [
+        "roll",
+        "attendance",
+        "sessional1",
+        "sessional2",
+        "sessional3",
+        "predicted_endsem",
+        "average_sessional"
+    ]
+
+    for col in numeric_cols:
+        if col in save_df.columns:
+            save_df[col] = pd.to_numeric(save_df[col], errors="coerce")
+
+    save_df.to_csv(CSV_FILE, index=False)
 
 
 # -----------------------------
@@ -167,21 +210,21 @@ def predict_result(model, attendance, s1, s2, s3):
 
 def build_student_record(name, roll, attendance, s1, s2, s3, result, action, source_mode):
     return {
-        "name": name.strip(),
+        "name": str(name).strip(),
         "roll": int(roll),
         "attendance": float(attendance),
         "sessional1": float(s1),
         "sessional2": float(s2),
         "sessional3": float(s3),
-        "predicted_endsem": result["predicted_endsem"],
-        "status": result["status"],
-        "grade": result["grade"],
-        "trend": result["trend"],
-        "attendance_status": result["attendance_status"],
-        "average_sessional": result["average_sessional"],
-        "record_action": action,
+        "predicted_endsem": float(result["predicted_endsem"]),
+        "status": str(result["status"]),
+        "grade": str(result["grade"]),
+        "trend": str(result["trend"]),
+        "attendance_status": str(result["attendance_status"]),
+        "average_sessional": float(result["average_sessional"]),
+        "record_action": str(action),
         "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "source_mode": source_mode
+        "source_mode": str(source_mode)
     }
 
 
@@ -283,7 +326,8 @@ with tab1:
 
         show_prediction_section(result)
 
-        existing = df[df["roll"].astype(int) == int(student["roll"])]
+        df["roll"] = pd.to_numeric(df["roll"], errors="coerce")
+        existing = df[df["roll"] == int(student["roll"])]
 
         if not existing.empty:
             st.warning("This roll number already exists.")
@@ -311,8 +355,22 @@ with tab1:
 
                     existing_index = existing.index[0]
 
+                    text_cols = [
+                        "name",
+                        "status",
+                        "grade",
+                        "trend",
+                        "attendance_status",
+                        "record_action",
+                        "last_updated",
+                        "source_mode"
+                    ]
+                    for col in text_cols:
+                        if col in df.columns:
+                            df[col] = df[col].astype("object")
+
                     for col, value in updated_student.items():
-                        df.loc[existing_index, col] = value
+                        df.at[existing_index, col] = value
 
                     save_data(df)
 
@@ -359,7 +417,8 @@ with tab2:
         st.session_state["search_triggered"] = True
 
     if st.session_state.get("search_triggered", False):
-        found = df[df["roll"].astype(int) == int(search_roll)]
+        df["roll"] = pd.to_numeric(df["roll"], errors="coerce")
+        found = df[df["roll"] == int(search_roll)]
 
         if found.empty:
             st.error("No student found for this roll number.")
@@ -381,15 +440,29 @@ with tab2:
             if st.button("Save Prediction to Existing Record", use_container_width=True):
                 idx = found.index[0]
 
-                df.loc[idx, "predicted_endsem"] = result["predicted_endsem"]
-                df.loc[idx, "status"] = result["status"]
-                df.loc[idx, "grade"] = result["grade"]
-                df.loc[idx, "trend"] = result["trend"]
-                df.loc[idx, "attendance_status"] = result["attendance_status"]
-                df.loc[idx, "average_sessional"] = result["average_sessional"]
-                df.loc[idx, "record_action"] = "Prediction Updated"
-                df.loc[idx, "last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                df.loc[idx, "source_mode"] = "Search Existing Student"
+                text_cols = [
+                    "name",
+                    "status",
+                    "grade",
+                    "trend",
+                    "attendance_status",
+                    "record_action",
+                    "last_updated",
+                    "source_mode"
+                ]
+                for col in text_cols:
+                    if col in df.columns:
+                        df[col] = df[col].astype("object")
+
+                df.at[idx, "predicted_endsem"] = result["predicted_endsem"]
+                df.at[idx, "status"] = result["status"]
+                df.at[idx, "grade"] = result["grade"]
+                df.at[idx, "trend"] = result["trend"]
+                df.at[idx, "attendance_status"] = result["attendance_status"]
+                df.at[idx, "average_sessional"] = result["average_sessional"]
+                df.at[idx, "record_action"] = "Prediction Updated"
+                df.at[idx, "last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                df.at[idx, "source_mode"] = "Search Existing Student"
 
                 save_data(df)
                 st.success("Prediction saved to the existing record successfully.")
